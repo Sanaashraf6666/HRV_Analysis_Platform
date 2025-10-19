@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HRV Analysis Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+            color: #333;
+        }
+        .container {
+            max-width: 960px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .tab-button.active {
+            border-bottom: 2px solid #3b82f6;
+            color: #3b82f6;
+        }
+        .button {
+            transition: all 0.2s ease-in-out;
+        }
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .result-box {
+            background-color: #f8fafc;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+            border: 1px solid #e2e8f0;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Style for the Clinical Feedback section */
+        #clinicalFeedback {
+            padding: 1.5rem;
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-top: 2rem;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-6">
+
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">HRV Analysis Dashboard</h1>
+        
+        <!-- Tab Navigation -->
+        <div class="flex border-b border-gray-200 mb-6">
+            <button id="tab-csv" class="tab-button active py-2 px-4 font-medium text-gray-600 focus:outline-none">
+                Upload CSV
+            </button>
+            <button id="tab-manual" class="tab-button py-2 px-4 font-medium text-gray-600 focus:outline-none">
+                Manual Entry
+            </button>
+            <button id="tab-device" class="tab-button py-2 px-4 font-medium text-gray-600 focus:outline-none">
+                Device Sync
+            </button>
+            <button id="tab-mock" class="tab-button py-2 px-4 font-medium text-gray-600 focus:outline-none">
+                Analyze Mock Data
+            </button>
+        </div>
+
+        <!-- Dynamic Message Box -->
+        <div id="messageBox" class="hidden mb-4 p-3 rounded-lg text-sm text-center font-medium transition-all duration-300"></div>
+
+        <!-- Tab Content -->
+        <div id="content-csv" class="tab-content">
+            <div class="flex flex-col items-center">
+                <p class="text-center text-gray-600 mb-4">Upload a CSV file containing RR-interval data.</p>
+                <input type="file" id="csvFile" accept=".csv" class="block w-full text-sm text-gray-500
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded-full file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-violet-50 file:text-violet-700
+                    hover:file:bg-violet-100"/>
+                <button id="uploadButton" class="button mt-6 bg-blue-500 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:bg-blue-600 transition-all">
+                    Analyze HRV Data
+                </button>
+            </div>
+        </div>
+        
+        <div id="content-manual" class="tab-content hidden">
+            <div class="flex flex-col items-center">
+                <p class="text-center text-gray-600 mb-4">Enter comma-separated RR-intervals (e.g., 800, 810, 795, ...).</p>
+                <textarea id="manualData" rows="6" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 transition-all"></textarea>
+                <button id="manualButton" class="button mt-6 bg-blue-500 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:bg-blue-600 transition-all">
+                    Analyze HRV Data
+                </button>
+            </div>
+        </div>
+
+        <div id="content-device" class="tab-content hidden">
+            <div class="flex flex-col items-center">
+                <p class="text-center text-gray-600 mb-4">Simulate data sync from a device. This will use a mock dataset to run the analysis.</p>
+                <div class="flex gap-4 mt-6">
+                    <button id="googleFitButton" class="button bg-gray-200 text-gray-700 font-bold py-2 px-6 rounded-full shadow-lg hover:bg-gray-300 transition-all">
+                        Sync with Google Fit
+                    </button>
+                    <button id="fitbitButton" class="button bg-gray-200 text-gray-700 font-bold py-2 px-6 rounded-full shadow-lg hover:bg-gray-300 transition-all">
+                        Sync with Fitbit
+                    </button>
+                    <button id="garminButton" class="button bg-gray-200 text-gray-700 font-bold py-2 px-6 rounded-full shadow-lg hover:bg-gray-300 transition-all">
+                        Sync with Garmin
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="content-mock" class="tab-content hidden">
+            <div class="flex flex-col items-center">
+                <p class="text-center text-gray-600 mb-4">Run an analysis with a mock dataset to see how the dashboard works.</p>
+                <button id="mockButton" class="button bg-blue-500 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:bg-blue-600 transition-all">
+                    Analyze Mock Data
+                </button>
+            </div>
+        </div>
+
+        <!-- Analysis Results Section -->
+        <div id="resultsSection" class="hidden">
+            <div class="mt-8 text-center" id="loadingIndicator">
+                <div class="loading-spinner mx-auto"></div>
+                <p class="mt-2 text-gray-600">Analyzing data...</p>
+            </div>
+            
+            <div id="analysisResults" class="hidden mt-8">
+                <h2 class="text-2xl font-bold text-gray-800 text-center mb-4">Analysis Results</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-center">
+                    <div class="result-box">
+                        <p class="text-gray-500 text-sm">Mean RR (ms)</p>
+                        <p id="mean_rr" class="text-xl font-semibold mt-1"></p>
+                    </div>
+                    <div class="result-box">
+                        <p class="text-gray-500 text-sm">SDNN (ms)</p>
+                        <p id="sdnn" class="text-xl font-semibold mt-1"></p>
+                    </div>
+                    <div class="result-box">
+                        <p class="text-gray-500 text-sm">RMSSD (ms)</p>
+                        <p id="rmssd" class="text-xl font-semibold mt-1"></p>
+                    </div>
+                    <div class="result-box">
+                        <p class="text-gray-500 text-sm">LF/HF Ratio</p>
+                        <p id="lf_hf_ratio" class="text-xl font-semibold mt-1"></p>
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <img id="hrvPlot" class="w-full h-auto rounded-lg shadow-md border border-gray-200" alt="HRV Analysis Plots"/>
+                </div>
+            </div>
+
+            <!-- Clinical Feedback Section -->
+            <div id="feedbackSection" class="hidden mt-8">
+                <div class="flex justify-center mb-4">
+                    <button id="feedbackButton" class="button bg-green-500 text-white font-bold py-2 px-6 rounded-full shadow-lg hover:bg-green-600 transition-all">
+                        Get Clinical Feedback
+                    </button>
+                </div>
+                <div id="clinicalFeedback" class="text-gray-700"></div>
+            </div>
+        </div>
+        
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const tabs = {
+                csv: document.getElementById('tab-csv'),
+                manual: document.getElementById('tab-manual'),
+                device: document.getElementById('tab-device'),
+                mock: document.getElementById('tab-mock')
+            };
+            const contents = {
+                csv: document.getElementById('content-csv'),
+                manual: document.getElementById('content-manual'),
+                device: document.getElementById('content-device'),
+                mock: document.getElementById('content-mock')
+            };
+            const messageBox = document.getElementById('messageBox');
+
+            // Custom function to display messages
+            function showMessage(message, type = 'info') {
+                messageBox.textContent = message;
+                messageBox.className = 'mb-4 p-3 rounded-lg text-sm text-center font-medium transition-all duration-300';
+                messageBox.classList.remove('hidden');
+
+                if (type === 'error') {
+                    messageBox.classList.add('bg-red-100', 'text-red-700');
+                } else if (type === 'success') {
+                    messageBox.classList.add('bg-green-100', 'text-green-700');
+                } else { // info
+                    messageBox.classList.add('bg-blue-100', 'text-blue-700');
+                }
+
+                setTimeout(() => {
+                    messageBox.classList.add('hidden');
+                }, 5000);
+            }
+
+            function showTab(activeTab) {
+                for (const key in tabs) {
+                    tabs[key].classList.remove('active');
+                    contents[key].classList.add('hidden');
+                }
+                tabs[activeTab].classList.add('active');
+                contents[activeTab].classList.remove('hidden');
+                document.getElementById('analysisResults').classList.add('hidden');
+                document.getElementById('feedbackSection').classList.add('hidden');
+            }
+
+            // Helper function to show/hide sections
+            function showLoading(show) {
+                document.getElementById('loadingIndicator').classList.toggle('hidden', !show);
+                document.getElementById('analysisResults').classList.add('hidden');
+                document.getElementById('feedbackSection').classList.add('hidden');
+                document.getElementById('resultsSection').classList.toggle('hidden', !show);
+            }
+
+            function showResults(show) {
+                document.getElementById('loadingIndicator').classList.add('hidden');
+                document.getElementById('analysisResults').classList.toggle('hidden', !show);
+                document.getElementById('feedbackSection').classList.toggle('hidden', !show);
+                document.getElementById('resultsSection').classList.toggle('hidden', !show);
+            }
+
+            // Tab event listeners
+            tabs.csv.addEventListener('click', () => showTab('csv'));
+            tabs.manual.addEventListener('click', () => showTab('manual'));
+            tabs.device.addEventListener('click', () => showTab('device'));
+            tabs.mock.addEventListener('click', () => showTab('mock'));
+
+            // Analysis buttons
+            document.getElementById('uploadButton').addEventListener('click', () => {
+                const fileInput = document.getElementById('csvFile');
+                if (fileInput.files.length === 0) {
+                    showMessage('Please select a CSV file.', 'error');
+                    return;
+                }
+                showLoading(true);
+
+                const file = fileInput.files[0];
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const text = e.target.result;
+                    await sendDataToBackend(text, 'csv');
+                };
+                reader.readAsText(file);
+            });
+
+            document.getElementById('manualButton').addEventListener('click', async () => {
+                const data = document.getElementById('manualData').value;
+                if (!data) {
+                    showMessage('Please enter data manually.', 'error');
+                    return;
+                }
+                showLoading(true);
+                await sendDataToBackend(data, 'manual');
+            });
+
+            // New device sync buttons
+            document.getElementById('googleFitButton').addEventListener('click', async () => {
+                showLoading(true);
+                await sendDataToBackend(null, 'device');
+            });
+            
+            document.getElementById('fitbitButton').addEventListener('click', async () => {
+                showLoading(true);
+                await sendDataToBackend(null, 'device');
+            });
+            
+            document.getElementById('garminButton').addEventListener('click', async () => {
+                showLoading(true);
+                await sendDataToBackend(null, 'device');
+            });
+
+            // The new mock data button now has its own method
+            document.getElementById('mockButton').addEventListener('click', async () => {
+                showLoading(true);
+                await sendDataToBackend(null, 'mock');
+            });
+
+            async function sendDataToBackend(data, method) {
+                try {
+                    const response = await fetch('/analyze_hrv', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ data: data, method: method }),
+                    });
+                    const result = await response.json();
+
+                    if (response.ok) {
+                        document.getElementById('mean_rr').textContent = result.results.mean_rr.toFixed(2);
+                        document.getElementById('sdnn').textContent = result.results.sdnn.toFixed(2);
+                        document.getElementById('rmssd').textContent = result.results.rmssd.toFixed(2);
+                        document.getElementById('lf_hf_ratio').textContent = result.results.lf_hf_ratio.toFixed(2);
+                        document.getElementById('hrvPlot').src = `data:image/png;base64,${result.plot}`;
+                        showResults(true);
+                    } else {
+                        showMessage(`Error: ${result.error}`, 'error');
+                        showResults(false);
+                    }
+                } catch (error) {
+                    console.error('Error during analysis:', error);
+                    showMessage('An error occurred during analysis. Please try again.', 'error');
+                    showResults(false);
+                }
+            }
+            
+            // Feedback button
+            document.getElementById('feedbackButton').addEventListener('click', async () => {
+                const feedbackDiv = document.getElementById('clinicalFeedback');
+                feedbackDiv.innerHTML = '<p class="text-center text-gray-500">Generating feedback...</p>';
+                try {
+                    const response = await fetch('/get_feedback');
+                    const result = await response.json();
+                    if (response.ok) {
+                        feedbackDiv.textContent = result.feedback; // Use textContent for safety
+                    } else {
+                        feedbackDiv.textContent = `Error: ${result.feedback}`;
+                    }
+                } catch (error) {
+                    console.error('Error fetching feedback:', error);
+                    feedbackDiv.textContent = 'An error occurred while fetching feedback.';
+                }
+            });
+        });
+    </script>
+
+</body>
+</html>
