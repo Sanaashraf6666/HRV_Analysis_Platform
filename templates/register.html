@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HRV Platform Register</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        /* General Body and Container Styling */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Modern Font */
+            background-color: #f0f2f5; /* Light grey background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .login-card { /* Renamed from .box for consistency */
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); /* Subtle shadow */
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+        }
+
+        /* Title Styling */
+        h2 {
+            font-size: 24px;
+            color: #212529;
+            margin-bottom: 30px;
+            font-weight: 700;
+        }
+        
+        /* Input Styling */
+        input { 
+            width: 100%;
+            padding: 12px 15px;
+            margin: 10px 0 20px 0; /* Adjusted margin for better spacing */
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            box-sizing: border-box; 
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            border-color: #007bff;
+            outline: none;
+            box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+        }
+
+        /* Button Styling (Blue, Highly Rounded) */
+        button[type="submit"] {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            background-color: #4285F4; /* Primary Blue color */
+            color: white;
+            border: none;
+            border-radius: 25px; /* Highly rounded */
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+
+        button[type="submit"]:hover {
+            background-color: #3367d6; /* Slightly darker on hover */
+        }
+        
+        button[type="submit"]:active {
+            transform: scale(0.99);
+        }
+
+        /* Error Message Styling */
+        .error {
+            color: #dc3545;
+            font-size: 14px;
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        /* Login Link Styling */
+        a {
+            display: block;
+            text-align: center;
+            margin-top: 20px; /* Increased margin */
+            font-size: 14px;
+            color: #4285F4; /* Match link color to button color */
+            text-decoration: none;
+            font-weight: 500;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <h2 style="text-align:center;">HRV Platform Register</h2>
+
+        <form method="POST" action="/register">
+            <input name="email" placeholder="Email" required>
+            <input name="password" type="password" placeholder="Password" required>
+            <button type="submit">Register</button>
+        </form>
+
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
+
+        <a href="/login">Already have an account? Login</a>
+    </div>
+</body>
+</html>

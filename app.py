@@ -1,7 +1,39 @@
+
+import os
+from dotenv import load_dotenv
+
+# Load the variables from .env
+load_dotenv()
+
+# Replace hardcoded strings with these:
+CLIENT_ID = os.getenv('FITBIT_CLIENT_ID')
+CLIENT_SECRET = os.getenv('FITBIT_CLIENT_SECRET')
+API_KEY = os.getenv('GEMINI_API_KEY')
+
+
+
+
+   # required for login sessions
+import sqlite3
+
+def init_db():
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS tokens
+                 (email TEXT PRIMARY KEY, access_token TEXT, refresh_token TEXT, expires_at REAL)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
 import matplotlib
 matplotlib.use('Agg')
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, redirect, url_for, session
+
+from authlib.integrations.flask_client import OAuth
+
+
 import numpy as np
 from scipy import signal
 import os
@@ -12,18 +44,232 @@ from flask_cors import CORS
 import logging
 import requests
 
+from requests_oauthlib import OAuth2Session
+
+import os
+# ALLOWS OAUTH TO WORK OVER HTTP (LOCAL ONLY)
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 # Set Flask logging to a higher level to see more debug info
 logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 CORS(app)
+app.secret_key = "nsecret123"
+app.secret_key = os.getenv('FLASK_SECRET_KEY')
+
+# 1. Configuration
+CLIENT_ID = os.getenv('FITBIT_CLIENT_ID')
+CLIENT_SECRET = os.getenv('FITBIT_CLIENT_SECRET')
+REDIRECT_URI = 'http://127.0.0.1:5000/callback'
+
+SCOPE = ['heartrate', 'profile', 'activity']
+
+# 2. Start Authorization
+@app.route("/auth/fitbit")
+def auth_fitbit():
+    # This creates the Fitbit login link
+    fitbit = OAuth2Session(CLIENT_ID, scope=SCOPE, redirect_uri=REDIRECT_URI)
+    authorization_url, state = fitbit.authorization_url("https://www.fitbit.com/oauth2/authorize")
+    session['oauth_state'] = state # Protects against CSRF attacks
+    return redirect(authorization_url)
+
+# 3. Handle the Callback
+@app.route("/callback")
+def callback():
+    # Setup the OAuth session using the state saved earlier
+    fitbit = OAuth2Session(CLIENT_ID, state=session.get('oauth_state'), redirect_uri=REDIRECT_URI)
+    
+    # Fetch the actual token from Fitbit
+    token = fitbit.fetch_token(
+        "https://api.fitbit.com/oauth2/token",
+        client_secret=CLIENT_SECRET,
+        authorization_response=request.url
+    )
+    
+    # 1. Save token to browser session
+    session['fitbit_token'] = token 
+    session.permanent = True 
+    
+    # 2. Save to Database for long-term use
+    email = session.get('user')
+    if email:
+        try:
+            conn = sqlite3.connect('users.db')
+            c = conn.cursor()
+            c.execute('REPLACE INTO tokens VALUES (?, ?, ?, ?)', 
+                      (email, token['access_token'], token['refresh_token'], token['expires_at']))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logging.error(f"Database error: {e}")
+    
+    # 3. Final Redirect
+    return redirect(url_for('dashboard', tab='device'))
+
+
+def get_db_token(email):
+    conn = sqlite3.connect('users.db')
+    c = conn.cursor()
+    c.execute('SELECT access_token, refresh_token, expires_at FROM tokens WHERE email=?', (email,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return {'access_token': row[0], 'refresh_token': row[1], 'expires_at': row[2]}
+    return None
+
+def get_valid_token():
+    token = session.get('fitbit_token')
+    if not token:
+        return None
+
+    # Check if token is expired (or about to expire in 60 seconds)
+    from time import time
+    if token.get('expires_at') and token['expires_at'] < time() + 60:
+        extra = {'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET}
+        fitbit = OAuth2Session(CLIENT_ID, token=token)
+        
+        # Request a new access token using the refresh token
+        new_token = fitbit.refresh_token("https://api.fitbit.com/oauth2/token", **extra)
+        session['fitbit_token'] = new_token
+        return new_token
+    
+    return token
+
+# 4. Fetch and Process Data
+@app.route("/analyze_fitbit")
+def analyze_fitbit():
+    # 1. Get a fresh token (Checks if expired and refreshes automatically)
+    token = get_valid_token() 
+    if not token:
+        return jsonify({'error': 'Fitbit not connected or session expired. Please login.'}), 401
+
+    url = "https://api.fitbit.com/1/user/-/activities/heart/date/today/1d/1sec.json"
+    headers = {'Authorization': f"Bearer {token['access_token']}"}
+    
+    try:
+        response = requests.get(url, headers=headers)
+        data = response.json()
+
+        # 2. Check for API-level errors (like 'Forbidden' or 'Rate Limit')
+        if 'errors' in data:
+            return jsonify({'error': data['errors'][0]['message']}), 403
+
+        # 3. Safely extract dataset using .get() to avoid KeyErrors
+        intraday_data = data.get('activities-heart-intraday', {}).get('dataset', [])
+
+        if not intraday_data:
+            return jsonify({'error': 'No heart rate data found for today. Wear your tracker and sync!'}), 404
+
+        # 4. Convert BPM to RR intervals
+        rr_intervals = [60000 / entry['value'] for entry in intraday_data]
+
+        if len(rr_intervals) < 20: # Minimum threshold for a quick check
+            return jsonify({'error': 'Insufficient data points recorded for a valid HRV analysis.'}), 400
+
+        # 5. Process with existing HRV logic
+        results = calculate_hrv_parameters(np.array(rr_intervals))
+        
+        # Save results globally for the feedback function
+        global last_analysis_results
+        last_analysis_results = results
+        
+        return jsonify(results)
+
+    except Exception as e:
+        logging.error(f"Fitbit analysis failed: {str(e)}")
+        return jsonify({'error': 'Internal server error during data processing.'}), 500
+
+
+
+
+
+
 
 last_analysis_results = {}
+@app.route("/", methods=["GET"])
+def home():
+    global users
+    if "user" in session:
+        return redirect("/dashboard")
+    return redirect("/login")
 
-@app.route('/')
-def index():
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email")
+        password = request.form.get("password")
+
+        with open("users.json", "r") as f:
+            users = json.load(f)
+
+
+        print("Saving user:", email, password)
+        print("Users before save:", users)
+        # Load users
+       
+
+        if email in users and users[email] == password:
+            session["user"] = email
+            return redirect("/dashboard")
+        else:
+            return render_template("login.html", error="Invalid credentials")
+
+    return render_template("login.html")
+@app.route('/dashboard')
+def dashboard():
+    if "user" not in session:
+        return redirect("/login")
     return render_template('index.html')
+# Registration route
+import json
 
+import os
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    # Ensure users.json exists
+    if not os.path.exists("users.json"):
+        with open("users.json", "w") as f:
+            json.dump({"admin": "123"}, f)
+
+    if request.method == "POST":
+        email = request.form.get("email")
+        password = request.form.get("password")
+
+        # Load users
+        with open("users.json", "r") as f:
+            users = json.load(f)
+
+        # Check if user exists
+        if email in users:
+            return render_template("register.html", error="User already exists")
+
+        # Save new user
+        users[email] = password
+        with open("users.json", "w") as f:
+            json.dump(users, f)
+
+        return redirect("/login")
+
+    # GET request → show register page
+    return render_template("register.html")
+
+
+       
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    return redirect("/login")
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+# HRV Analysis Functions
 def generate_mock_rr_intervals(num_points=500):
     """
     Generates a mock time series of RR intervals for demonstration.
@@ -140,8 +386,30 @@ def analyze_hrv_with_results_storage():
             return jsonify({'error': 'Insufficient data. Please provide at least 200 RR-intervals for proper analysis.'}), 400
         
         rr_intervals = np.array(rr_intervals_list)
-    elif method in ['device', 'mock']:
-        logging.info(f"Method '{method}' selected. Generating mock data.")
+    elif method == 'device':
+        token = session.get('fitbit_token')
+        if not token:
+            return jsonify({'error': 'Fitbit not connected. Please sync first.'}), 401
+        
+        # API Request for real heart rate data
+        url = "https://api.fitbit.com/1/user/-/activities/heart/date/today/1d/1sec.json"
+        headers = {'Authorization': f"Bearer {token['access_token']}"}
+        
+        try:
+            response = requests.get(url, headers=headers)
+            data = response.json()
+            dataset = data['activities-heart-intraday']['dataset']
+            
+            if not dataset:
+                return jsonify({'error': 'No heart rate data found for today. Wear your tracker!'}), 404
+            
+            # Convert BPM to RR Intervals (ms) -> 60000 / BPM
+            rr_intervals = [60000 / entry['value'] for entry in dataset]
+            
+        except Exception as e:
+            return jsonify({'error': f'Failed to fetch Fitbit data: {str(e)}'}), 500
+
+    elif method == 'mock':
         rr_intervals = generate_mock_rr_intervals()
     else:
         return jsonify({'error': 'Invalid analysis method specified.'}), 400
@@ -166,56 +434,67 @@ def analyze_hrv_with_results_storage():
         # We will now print the actual error to the console for better debugging.
         logging.error(f"An error occurred during analysis: {e}", exc_info=True)
         return jsonify({'error': 'An error occurred during analysis. Please try again.'}), 500
-
-
 @app.route('/get_feedback', methods=['GET'])
 def get_feedback():
     global last_analysis_results
-    logging.info("Fetching feedback...")
+    api_key = os.getenv('GEMINI_API_KEY')
     
-    if not last_analysis_results:
-        logging.warning("No analysis results found. Requesting analysis first.")
-        return jsonify({'feedback': 'Please analyze the data first.'})
-
-    rmssd = last_analysis_results.get('rmssd', 0)
-    sdnn = last_analysis_results.get('sdnn', 0)
-    lf_hf_ratio = last_analysis_results.get('lf_hf_ratio', 0)
-    sd1 = last_analysis_results.get('sd1', 0)
-    
-    # Get API key from environment variables.
-    api_key = os.environ.get('API_KEY', '') # Add a default value to prevent NoneType error
-    if not api_key:
-        logging.error("API_KEY environment variable is not set.")
-        return jsonify({'error': 'Feedback service is not available. API key is missing.'}), 503
-    
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
-
-    system_prompt = "Act as a world-class heart rate variability (HRV) analyst. Provide a single-paragraph summary of the key findings from the provided HRV parameters. Conclude with a list of 3 specific and actionable recommendations for improvement, with each recommendation on a new line. Format the entire response as a list. dont use * or ** .list parameter values as list"
-
-    user_query = f"Provide an HRV analysis based on the following parameters: RMSSD: {rmssd:.2f} ms, SDNN: {sdnn:.2f} ms, LF/HF Ratio: {lf_hf_ratio:.2f}, SD1: {sd1:.2f} ms."
-    
-    payload = {
-        "contents": [{"parts": [{"text": user_query}]}],
-        "systemInstruction": {"parts": [{"text": system_prompt}]},
-    }
-    
+    # 1. Dynamically find an available model
+    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
     try:
-        response = requests.post(api_url, json=payload)
-        response.raise_for_status()
-        result = response.json()
+        models_resp = requests.get(list_url)
+        available_models = models_resp.json().get('models', [])
+        model_name = next((m['name'] for m in available_models if 'generateContent' in m['supportedGenerationMethods']), None)
         
-        generated_text = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'Failed to generate feedback.')
-        
-        logging.info("Feedback generated by LLM and sent to frontend.")
-        return jsonify({'feedback': generated_text})
-        
-    except requests.exceptions.RequestException as e:
-        logging.error(f"API request failed: {e}")
-        return jsonify({'error': 'An error occurred while connecting to the feedback service.'}), 500
-    except (KeyError, IndexError) as e:
-        logging.error(f"Failed to parse API response: {e}")
-        return jsonify({'error': 'An error occurred while parsing the feedback response.'}), 500
+        if not model_name:
+            return jsonify({'error': 'No available models found.'}), 404
+            
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
 
+        # 2. Educational Prompt (Avoids Safety Filters)
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": (
+                        "Act as an HRV Data Scientist. Provide an objective, educational report.\n\n"
+                        "ANALYSIS THRESHOLDS:\n"
+                        "1. STATUS: Baseline Activity -> RMSSD 25-85ms. Focus on stability.\n"
+                        "2. STATUS: Sympathetic Dominance -> LF/HF > 2.0. Focus on recovery needs.\n"
+                        "3. STATUS: High Variability -> RMSSD 86-115ms. Note as high fitness.\n"
+                        "4. STATUS: Potential Irregularity -> RMSSD > 120ms. Flag for professional review.\n\n"
+                        "MANDATORY TEMPLATE:\n"
+                        "STATUS: [Insert Label]\n"
+                        "DATA OBSERVATION: [Explain autonomic balance objectively.]\n"
 
+                        "HEALTH TIPS: [3 evidence-based lifestyle tips.]\n\n"
+                        "CRITICAL KNOWLEDGE: If RMSSD is > 100ms and the user reports palpitations, it may be arrhythmia rather than high fitness. If LF/HF ratio is very low, it indicates parasympathetic dominance or potential rhythm chaos.\n\n"
+                        "STRICT RULE: No stars, no bolding, no markdown. Use plain text only.\n\n"
+            
+                        "DISCLAIMER: 'For educational purposes only. Individual baselines vary.'\n\n"
+                        f"Data: RMSSD: {last_analysis_results.get('rmssd')}ms, LF/HF: {last_analysis_results.get('lf_hf_ratio')}."
+                    )
+                }]
+            }]
+        }
+        
+        # 3. Post request and handle hidden API errors
+        response = requests.post(api_url, json=payload, timeout=60)
+        res_json = response.json()
+
+        if 'error' in res_json:
+            logging.error(f"Google API Error: {res_json['error']['message']}")
+            return jsonify({'error': f"API Error: {res_json['error']['message']}"}), 500
+
+        if 'candidates' in res_json and res_json['candidates']:
+            ai_text = res_json['candidates'][0]['content']['parts'][0]['text']
+            return jsonify({'feedback': ai_text})
+        else:
+            # Captures cases where the safety filter blocked the response
+            logging.error(f"Full API Response (Blocked): {res_json}")
+            return jsonify({'error': 'The AI safety filter blocked this analysis. Try using less clinical terms.'}), 500
+
+    except Exception as e:
+        logging.error(f"System Error: {str(e)}")
+        return jsonify({'error': 'Internal Server Error. Check terminal logs.'}), 500
 if __name__ == '__main__':
     app.run(debug=True)
