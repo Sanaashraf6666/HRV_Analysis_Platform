@@ -465,11 +465,7 @@ def get_feedback():
                         "MANDATORY TEMPLATE:\n"
                         "STATUS: [Insert Label]\n"
                         "DATA OBSERVATION: [Explain autonomic balance objectively.]\n"
-
                         "HEALTH TIPS: [3 evidence-based lifestyle tips.]\n\n"
-                        "CRITICAL KNOWLEDGE: If RMSSD is > 100ms and the user reports palpitations, it may be arrhythmia rather than high fitness. If LF/HF ratio is very low, it indicates parasympathetic dominance or potential rhythm chaos.\n\n"
-                        "STRICT RULE: No stars, no bolding, no markdown. Use plain text only.\n\n"
-            
                         "DISCLAIMER: 'For educational purposes only. Individual baselines vary.'\n\n"
                         f"Data: RMSSD: {last_analysis_results.get('rmssd')}ms, LF/HF: {last_analysis_results.get('lf_hf_ratio')}."
                     )
